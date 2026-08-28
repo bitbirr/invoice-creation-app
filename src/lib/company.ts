@@ -16,12 +16,12 @@ function requiredEnv(name: string, fallback: string): string {
 }
 
 export function getCompany(): CompanyProfile {
-  const taxRateBps = Number(process.env.TAX_RATE_BPS ?? "2100");
+  const taxRateBps = Number(process.env.TAX_RATE_BPS ?? "1500");
   if (!Number.isInteger(taxRateBps) || taxRateBps < 0 || taxRateBps > 10000) {
     throw new Error("TAX_RATE_BPS must be an integer from 0 to 10000");
   }
 
-  const currency = requiredEnv("CURRENCY", "EUR").toUpperCase();
+  const currency = requiredEnv("CURRENCY", "ETB").toUpperCase();
   if (!/^[A-Z]{3}$/.test(currency)) {
     throw new Error("CURRENCY must be a 3-letter ISO code");
   }

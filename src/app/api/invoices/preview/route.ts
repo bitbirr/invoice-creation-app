@@ -7,10 +7,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const input = invoicePreviewSchema.parse(body);
-    const totals = calculateInvoice({
-      taxRateBps: input.taxRateBps,
-      lineItems: input.lineItems,
-    });
+    const totals = calculateInvoice(input.lineItems, input.taxRateBps);
     return NextResponse.json({ currency: input.currency, ...totals });
   } catch (error) {
     if (error instanceof SyntaxError) {

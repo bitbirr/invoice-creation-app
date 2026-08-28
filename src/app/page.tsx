@@ -22,8 +22,8 @@ export default async function HomePage() {
       </div>
       {dbError ? (
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          Database is not reachable. Start Postgres with <code>docker compose up -d</code>, copy{" "}
-          <code>.env.example</code> to <code>.env</code>, then run <code>npx prisma migrate deploy</code>.
+          Database is not reachable. Postgres and migrations are owned by the n8n DevOps
+          workflow (see <code>docs/N8N_DEVOPS_PROMPT.md</code>).
         </p>
       ) : null}
       <InvoiceList invoices={invoices} />

@@ -43,3 +43,13 @@ export function handleRouteError(error: unknown) {
   console.error(error);
   return jsonError(500, "INTERNAL_ERROR", "Something went wrong. Your data was not changed.");
 }
+
+export function fromUnknown(error: unknown) {
+  return handleRouteError(error);
+}
+
+export type InvoiceWriteInput = {
+  currency: string;
+  taxRateBps: number;
+  lines: { description: string; quantity: string; unitPrice: string }[];
+};
