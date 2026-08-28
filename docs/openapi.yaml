@@ -1,0 +1,142 @@
+openapi: 3.0.3
+info:
+  title: Invoice Creation App API
+  version: 0.1.0
+  description: Internal MVP contract. Totals are always computed on the server.
+servers:
+  - url: /api
+paths:
+  /invoices:
+    get:
+      summary: List invoices
+      parameters:
+        - in: query
+          name: status
+          schema:
+            $ref: "#/components/schemas/InvoiceStatus"
+      responses:
+        "200":
+          description: OK
+    post:
+      summary: Create draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvoiceWrite"
+      responses:
+        "201":
+          description: Created
+        "400":
+          description: Validation failed
+  /invoices/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Get invoice
+      responses:
+        "200":
+          description: OK
+        "404":
+          description: Not found
+    patch:
+      summary: Update draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvoicePatch"
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: Validation failed
+        "404":
+          description: Not found
+        "409":
+          description: Immutable or version conflict
+  /invoices/{id}/submit:
+    post:
+      summary: Submit draft (idempotent if already submitted)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version:
+                  type: integer
+      responses:
+        "200":
+          description: Submitted or already submitted
+        "400":
+          description: Validation failed
+        "404":
+          description: Not found
+        "409":
+          description: Version conflict
+  /invoices/{id}/pdf:
+    get:
+      summary: Download PDF generated from persisted invoice
+      responses:
+        "200":
+          description: PDF
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Not found
+components:
+  schemas:
+    InvoiceStatus:
+      type: string
+      enum: [DRAFT, SUBMITTED]
+    LineWrite:
+      type: object
+      required: [description, quantity, unitPriceCents]
+      properties:
+        description:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+        unitPriceCents:
+          type: integer
+          minimum: 0
+    InvoiceWrite:
+      type: object
+      required: [customerName, lineItems]
+      properties:
+        customerName:
+          type: string
+        customerEmail:
+          type: string
+          nullable: true
+        customerAddress:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        lineItems:
+          type: array
+          items:
+            $ref: "#/components/schemas/LineWrite"
+    InvoicePatch:
+      allOf:
+        - $ref: "#/components/schemas/InvoiceWrite"
+        - type: object
+          required: [version]
+          properties:
+            version:
+              type: integer

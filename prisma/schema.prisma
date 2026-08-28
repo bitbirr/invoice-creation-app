@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SUBMITTED
+}
+
+model Invoice {
+  id     String         @id @default(cuid())
+  status InvoiceStatus  @default(DRAFT)
+  number String?        @unique
+
+  currency   String @db.Char(3)
+  taxRateBps Int
+
+  customerName    String
+  customerEmail   String?
+  customerAddress String?
+  notes           String?
+
+  sellerName    String
+  sellerAddress String
+  sellerEmail   String
+  sellerVat     String
+
+  subtotalCents Int @default(0)
+  taxCents      Int @default(0)
+  totalCents    Int @default(0)
+
+  version     Int       @default(1)
+  issueDate   DateTime?
+  submittedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  lineItems LineItem[]
+
+  @@index([status, createdAt])
+}
+
+model LineItem {
+  id             String  @id @default(cuid())
+  invoiceId      String
+  invoice        Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  position       Int
+  description    String
+  quantity       Int
+  unitPriceCents Int
+  lineTotalCents Int
+
+  @@index([invoiceId, position])
+}
+
+/// Per-year monotonic counter used to assign invoice numbers on submit.
+model InvoiceSequence {
+  year Int @id
+  last Int
+}
