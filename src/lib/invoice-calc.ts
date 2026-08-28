@@ -1,78 +1,48 @@
-import Decimal from "decimal.js";
-import { MoneyError, moneyString, roundMoney, toDecimal } from "./money";
+import { roundHalfUpToInt } from "./money";
 
 export type LineInput = {
   description: string;
-  quantity: string;
-  unitPrice: string;
+  quantity: number;
+  unitPriceCents: number;
 };
 
 export type CalculatedLine = LineInput & {
   position: number;
-  lineTotal: string;
-};
-
-export type InvoiceCalcInput = {
-  lineItems: LineInput[];
-  taxRateBps: number;
+  lineTotalCents: number;
 };
 
 export type InvoiceTotals = {
-  lines: CalculatedLine[];
-  subtotal: string;
-  taxTotal: string;
-  grandTotal: string;
-  taxRateBps: number;
+  lineItems: CalculatedLine[];
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
 };
 
-/**
- * Authoritative invoice arithmetic.
- *
- * Policy (proposed; confirm before go-live):
- * 1. Line total = round_half_up(quantity * unitPrice, 2)
- * 2. Subtotal   = sum of rounded line totals
- * 3. Tax        = round_half_up(subtotal * taxRateBps / 10000, 2)
- * 4. Grand total = subtotal + tax
- *
- * Browser UI may call this for instant feedback. Save and submit always
- * recompute on the server with this same function and persist the snapshots.
- */
-export function calculateInvoice(input: InvoiceCalcInput): InvoiceTotals {
-  if (!Number.isInteger(input.taxRateBps) || input.taxRateBps < 0 || input.taxRateBps > 10000) {
-    throw new MoneyError("taxRateBps must be an integer between 0 and 10000");
+export function calculateInvoice(
+  lines: LineInput[],
+  taxRateBps: number,
+): InvoiceTotals {
+  if (!Number.isInteger(taxRateBps) || taxRateBps < 0 || taxRateBps > 10000) {
+    throw new Error("taxRateBps must be an integer from 0 to 10000");
   }
 
-  const lines: CalculatedLine[] = input.lineItems.map((item, index) => {
-    const quantity = toDecimal(item.quantity);
-    const unitPrice = toDecimal(item.unitPrice);
-    if (quantity.lt(0) || unitPrice.lt(0)) {
-      throw new MoneyError("Quantity and unit price must be >= 0");
+  const lineItems: CalculatedLine[] = lines.map((line, position) => {
+    if (!Number.isInteger(line.quantity) || line.quantity < 1) {
+      throw new Error(`quantity must be an integer ≥ 1 (line ${position + 1})`);
     }
-    if (quantity.decimalPlaces() > 4) {
-      throw new MoneyError("Quantity supports at most 4 decimal places");
+    if (!Number.isInteger(line.unitPriceCents) || line.unitPriceCents < 0) {
+      throw new Error(`unitPriceCents must be an integer ≥ 0 (line ${position + 1})`);
     }
-    const lineTotal = roundMoney(quantity.times(unitPrice));
     return {
-      description: item.description,
-      quantity: quantity.toFixed(),
-      unitPrice: moneyString(unitPrice),
-      position: index,
-      lineTotal: moneyString(lineTotal),
+      ...line,
+      position,
+      lineTotalCents: line.quantity * line.unitPriceCents,
     };
   });
 
-  const subtotal = roundMoney(
-    lines.reduce((acc, line) => acc.plus(line.lineTotal), new Decimal(0)),
-  );
-  const taxRate = toDecimal(input.taxRateBps).dividedBy(10000);
-  const taxTotal = roundMoney(subtotal.times(taxRate));
-  const grandTotal = roundMoney(subtotal.plus(taxTotal));
+  const subtotalCents = lineItems.reduce((sum, line) => sum + line.lineTotalCents, 0);
+  const taxCents = roundHalfUpToInt(subtotalCents * taxRateBps, 10_000);
+  const totalCents = subtotalCents + taxCents;
 
-  return {
-    lines,
-    subtotal: moneyString(subtotal),
-    taxTotal: moneyString(taxTotal),
-    grandTotal: moneyString(grandTotal),
-    taxRateBps: input.taxRateBps,
-  };
+  return { lineItems, subtotalCents, taxCents, totalCents };
 }
