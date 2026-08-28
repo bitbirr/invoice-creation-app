@@ -1,0 +1,81 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SUBMITTED
+  VOID
+}
+
+/// Single-tenant issuer profile. One row for the internal MVP.
+model OrganizationSettings {
+  id               String   @id @default(uuid()) @db.Uuid
+  legalName        String
+  addressLine1     String?
+  addressLine2     String?
+  city             String?
+  country          String   @default("ET")
+  taxId            String?
+  defaultCurrency  String   @default("ETB") @db.Char(3)
+  /// Basis points: 1500 = 15.00%. Proposed Ethiopian VAT default; confirm before go-live.
+  defaultTaxRateBps Int     @default(1500)
+  invoicePrefix    String   @default("INV")
+  invoiceYear      Int
+  invoiceSeq       Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@map("organization_settings")
+}
+
+model Invoice {
+  id             String        @id @default(uuid()) @db.Uuid
+  status         InvoiceStatus @default(DRAFT)
+  /// Public number assigned only on submit. Unique when present.
+  invoiceNumber  String?       @unique
+  issueDate      DateTime?     @db.Date
+  dueDate        DateTime?     @db.Date
+  currency       String        @db.Char(3)
+  taxRateBps     Int
+  customerName   String
+  customerEmail  String?
+  billingAddress String?
+  notes          String?
+  /// Persisted monetary snapshots (2-decimal strings stored as Decimal(19,4)).
+  subtotal       Decimal       @db.Decimal(19, 4)
+  taxTotal       Decimal       @db.Decimal(19, 4)
+  grandTotal     Decimal       @db.Decimal(19, 4)
+  version        Int           @default(1)
+  submittedAt    DateTime?
+  voidedAt       DateTime?
+  voidReason     String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  lineItems      InvoiceLineItem[]
+
+  @@index([status, createdAt])
+  @@map("invoices")
+}
+
+model InvoiceLineItem {
+  id          String   @id @default(uuid()) @db.Uuid
+  invoiceId   String   @db.Uuid
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  position    Int
+  description String
+  quantity    Decimal  @db.Decimal(19, 4)
+  unitPrice   Decimal  @db.Decimal(19, 4)
+  lineTotal   Decimal  @db.Decimal(19, 4)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([invoiceId, position])
+  @@index([invoiceId])
+  @@map("invoice_line_items")
+}
