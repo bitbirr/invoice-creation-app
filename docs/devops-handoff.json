@@ -1,0 +1,29 @@
+{
+  "type": "devops_handoff",
+  "project_key": "invoice-creation-app",
+  "github_repo": "bitbirr/invoice-creation-app",
+  "app_kind": "nextjs",
+  "branch": "main",
+  "public_path": "/",
+  "health_path": "/login",
+  "db": {
+    "engine": "postgres",
+    "schema_or_db": "invoice",
+    "migrate": "npx prisma migrate deploy"
+  },
+  "env_public": {
+    "CURRENCY": "ETB",
+    "TAX_RATE_BPS": "1500"
+  },
+  "secrets_to_generate": [
+    "AUTH_SECRET",
+    "AUTH_PASSWORD"
+  ],
+  "secrets_to_collect_from_human": [
+    "AUTH_EMAIL",
+    "COMPANY_NAME",
+    "COMPANY_ADDRESS",
+    "COMPANY_EMAIL",
+    "COMPANY_VAT"
+  ]
+}
