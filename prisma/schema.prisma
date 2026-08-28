@@ -5,77 +5,90 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  schemas  = ["invoice"]
 }
 
 enum InvoiceStatus {
-  DRAFT
-  SUBMITTED
-  VOID
+  draft
+  submitted
+  voided
+
+  @@schema("invoice")
 }
 
-/// Single-tenant issuer profile. One row for the internal MVP.
-model OrganizationSettings {
-  id               String   @id @default(uuid()) @db.Uuid
-  legalName        String
-  addressLine1     String?
-  addressLine2     String?
-  city             String?
-  country          String   @default("ET")
-  taxId            String?
-  defaultCurrency  String   @default("ETB") @db.Char(3)
-  /// Basis points: 1500 = 15.00%. Proposed Ethiopian VAT default; confirm before go-live.
-  defaultTaxRateBps Int     @default(1500)
-  invoicePrefix    String   @default("INV")
-  invoiceYear      Int
-  invoiceSeq       Int      @default(0)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+model IssuerProfile {
+  id             String   @id @default(cuid())
+  legalName      String   @map("legal_name")
+  addressLine1   String?  @map("address_line1")
+  addressLine2   String?  @map("address_line2")
+  city           String?
+  region         String?
+  postalCode     String?  @map("postal_code")
+  country        String   @default("ET")
+  email          String?
+  phone          String?
+  taxId          String?  @map("tax_id")
+  currency       String   @default("ETB") @db.Char(3)
+  defaultTaxBps  Int      @default(0) @map("default_tax_bps")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
-  @@map("organization_settings")
+  @@map("issuer_profiles")
+  @@schema("invoice")
 }
 
 model Invoice {
-  id             String        @id @default(uuid()) @db.Uuid
-  status         InvoiceStatus @default(DRAFT)
-  /// Public number assigned only on submit. Unique when present.
-  invoiceNumber  String?       @unique
-  issueDate      DateTime?     @db.Date
-  dueDate        DateTime?     @db.Date
-  currency       String        @db.Char(3)
-  taxRateBps     Int
-  customerName   String
-  customerEmail  String?
-  billingAddress String?
-  notes          String?
-  /// Persisted monetary snapshots (2-decimal strings stored as Decimal(19,4)).
-  subtotal       Decimal       @db.Decimal(19, 4)
-  taxTotal       Decimal       @db.Decimal(19, 4)
-  grandTotal     Decimal       @db.Decimal(19, 4)
-  version        Int           @default(1)
-  submittedAt    DateTime?
-  voidedAt       DateTime?
-  voidReason     String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  lineItems      InvoiceLineItem[]
+  id              String        @id @default(cuid())
+  status          InvoiceStatus @default(draft)
+  invoiceNumber   String?       @unique @map("invoice_number")
+  issueDate       DateTime      @map("issue_date") @db.Date
+  currency        String        @db.Char(3)
+  taxRateBps      Int           @map("tax_rate_bps")
+
+  customerName    String        @map("customer_name")
+  customerEmail   String?       @map("customer_email")
+  billingAddress  String?       @map("billing_address")
+  notes           String?
+
+  subtotalMinor   BigInt        @map("subtotal_minor")
+  taxMinor        BigInt        @map("tax_minor")
+  totalMinor      BigInt        @map("total_minor")
+
+  version         Int           @default(1)
+  submittedAt     DateTime?     @map("submitted_at")
+  snapshot        Json?
+
+  lineItems       LineItem[]
+
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
 
   @@index([status, createdAt])
   @@map("invoices")
+  @@schema("invoice")
 }
 
-model InvoiceLineItem {
-  id          String   @id @default(uuid()) @db.Uuid
-  invoiceId   String   @db.Uuid
-  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  position    Int
-  description String
-  quantity    Decimal  @db.Decimal(19, 4)
-  unitPrice   Decimal  @db.Decimal(19, 4)
-  lineTotal   Decimal  @db.Decimal(19, 4)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+model LineItem {
+  id              String   @id @default(cuid())
+  invoiceId       String   @map("invoice_id")
+  position        Int
+  description     String
+  quantityMilli   Int      @map("quantity_milli")
+  unitPriceMinor  BigInt   @map("unit_price_minor")
+  lineTotalMinor  BigInt   @map("line_total_minor")
 
-  @@unique([invoiceId, position])
-  @@index([invoiceId])
-  @@map("invoice_line_items")
+  invoice         Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId, position])
+  @@map("line_items")
+  @@schema("invoice")
+}
+
+/// Allocates sequential invoice numbers per calendar year on submit.
+model InvoiceNumberSequence {
+  year      Int @id
+  lastValue Int @map("last_value")
+
+  @@map("invoice_number_sequences")
+  @@schema("invoice")
 }
