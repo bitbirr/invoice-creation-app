@@ -1,0 +1,68 @@
+openapi: 3.0.3
+info:
+  title: Invoice Creation API
+  version: 0.1.0
+  description: Internal invoice draft, submit, and PDF export.
+servers:
+  - url: /api
+paths:
+  /issuer:
+    get:
+      summary: Get issuer profile
+      responses:
+        "200":
+          description: Issuer profile
+    put:
+      summary: Replace issuer profile
+      responses:
+        "200":
+          description: Saved issuer profile
+  /invoices:
+    get:
+      summary: List invoices
+      responses:
+        "200":
+          description: Invoice list
+    post:
+      summary: Create draft invoice
+      responses:
+        "201":
+          description: Draft created
+  /invoices/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+    get:
+      summary: Get invoice
+      responses:
+        "200":
+          description: Invoice
+        "404":
+          description: Not found
+    patch:
+      summary: Update draft invoice
+      responses:
+        "200":
+          description: Updated draft
+        "409":
+          description: Concurrent edit or submitted invoice
+  /invoices/{id}/submit:
+    post:
+      summary: Submit invoice
+      responses:
+        "200":
+          description: Submitted invoice
+  /invoices/{id}/pdf:
+    get:
+      summary: Download invoice PDF
+      responses:
+        "200":
+          description: PDF bytes
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary

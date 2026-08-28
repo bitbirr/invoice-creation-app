@@ -1,0 +1,76 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum InvoiceStatus {
+  draft
+  submitted
+}
+
+model IssuerProfile {
+  id                String   @id @default("default")
+  legalName         String   @map("legal_name")
+  address           String   @default("")
+  email             String?
+  phone             String?
+  taxId             String?  @map("tax_id")
+  defaultCurrency   String   @default("ETB") @map("default_currency") @db.Char(3)
+  defaultTaxRateBps Int      @default(1500) @map("default_tax_rate_bps")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("issuer_profiles")
+}
+
+model InvoiceNumberSequence {
+  year      Int @id
+  lastValue Int @default(0) @map("last_value")
+
+  @@map("invoice_number_sequences")
+}
+
+model Invoice {
+  id             String            @id @default(uuid())
+  status         InvoiceStatus     @default(draft)
+  number         String?           @unique
+  issueDate      DateTime?         @map("issue_date") @db.Date
+  dueDate        DateTime?         @map("due_date") @db.Date
+  currency       String            @db.Char(3)
+  taxRateBps     Int               @map("tax_rate_bps")
+  customerName   String            @default("") @map("customer_name")
+  customerEmail  String?           @map("customer_email")
+  customerPhone  String?           @map("customer_phone")
+  billingAddress String            @default("") @map("billing_address")
+  notes          String?
+  version        Int               @default(1)
+  subtotalMinor  BigInt            @default(0) @map("subtotal_minor")
+  taxMinor       BigInt            @default(0) @map("tax_minor")
+  totalMinor     BigInt            @default(0) @map("total_minor")
+  submittedAt    DateTime?         @map("submitted_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+  lineItems      InvoiceLineItem[]
+
+  @@index([status, createdAt(sort: Desc)])
+  @@map("invoices")
+}
+
+model InvoiceLineItem {
+  id             String   @id @default(uuid())
+  invoiceId      String   @map("invoice_id")
+  position       Int
+  description    String
+  quantity       Decimal  @db.Decimal(12, 3)
+  unitPriceMinor BigInt   @map("unit_price_minor")
+  lineTotalMinor BigInt   @map("line_total_minor")
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@unique([invoiceId, position])
+  @@index([invoiceId])
+  @@map("invoice_line_items")
+}
