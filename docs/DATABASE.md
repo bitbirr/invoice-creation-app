@@ -20,8 +20,8 @@ There is **no Customer table**. Name/email/address are snapshotted on the invoic
 | id | cuid | PK |
 | status | enum `DRAFT` \| `SUBMITTED` | |
 | number | text, unique, nullable | Assigned on submit; `INV-YYYY-NNNNNN` |
-| currency | char(3) | e.g. EUR |
-| taxRateBps | int | e.g. 2100 = 21% |
+| currency | char(3) | e.g. ETB |
+| taxRateBps | int | e.g. 1500 = 15% |
 | customerName | text | Required on submit |
 | customerEmail | text? | |
 | customerAddress | text? | |
@@ -64,6 +64,19 @@ Incremented inside the submit transaction (`INSERT … ON CONFLICT DO NOTHING` t
 
 ## Migrations
 
-Initial SQL: `prisma/migrations/20260828153000_init/migration.sql`.
+The repo contains **three stacked init migrations** from merged scaffolds. Do not rewrite the first two (they are already applied in production):
 
-Apply locally: `npm run db:migrate` (or `npx prisma migrate deploy` in CI/prod).
+1. `20260828100000_init` — schema `invoice` (snake_case, unused by the current app).
+2. `20260828120000_init` — public `invoices` / `organization_settings` and public `InvoiceStatus` (`DRAFT`, `SUBMITTED`, `VOID`).
+3. `20260828153000_init` — tables the app actually uses: `"Invoice"`, `"LineItem"`, `"InvoiceSequence"`. Does **not** recreate `InvoiceStatus` (that caused P3018).
+
+Apply: `npx prisma migrate deploy`.
+
+If `20260828153000_init` is recorded as **failed** (P3018), after this SQL is on the deployed branch:
+
+```bash
+npx prisma migrate resolve --rolled-back 20260828153000_init
+npx prisma migrate deploy
+```
+
+Do not `resolve --applied` for that migration (the app tables were not created). Do not hand-edit tables. Do not drop leftover objects from the first two inits without a backup.
