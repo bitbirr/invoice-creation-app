@@ -33,11 +33,22 @@ Error:
 | 200 | GET, PATCH, idempotent submit |
 | 201 | POST create |
 | 400 | Validation / malformed JSON |
+| 401 | Not logged in (`UNAUTHENTICATED`) or bad login (`INVALID_CREDENTIALS`) |
 | 404 | Unknown invoice id |
 | 409 | `VERSION_CONFLICT` or update of a submitted invoice (`INVOICE_IMMUTABLE`) |
 | 500 | Persistence or PDF failure (draft data is not deleted) |
 
 ## Endpoints
+
+### `POST /api/auth/login`
+
+Body: `{ "email": string, "password": string }`. Sets httpOnly session cookie.
+
+### `DELETE /api/auth/login`
+
+Clears the session cookie.
+
+All invoice endpoints below require a valid session (401 otherwise).
 
 ### `GET /api/invoices`
 

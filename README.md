@@ -8,15 +8,15 @@ Repository: `bitbirr/invoice-creation-app`
 
 Standalone **Next.js 16** (App Router) + **PostgreSQL** + **Prisma 6** app. Money is integer cents. The server recomputes totals; PDFs are generated from persisted rows with `pdf-lib`.
 
-This is **not** an extension of Supplier Invoice Tracker. That product was not found as a GitHub repo in the BitBirr org, and this agent is only allowed to work in this repository. Reuse remains a human override — see `docs/adr/0001-reuse-decision.md`.
+This is **not** an extension of Supplier Invoice Tracker (human-confirmed standalone). See `docs/adr/0001-reuse-decision.md`.
 
-Working defaults (confirm before production):
+Confirmed product defaults:
 
-- Currency `EUR`
-- Invoice-level tax `21%` (`TAX_RATE_BPS=2100`)
+- Currency `ETB`
+- Invoice-level tax `15%` Ethiopian VAT (`TAX_RATE_BPS=1500`)
 - Invoice numbers assigned on submit: `INV-YYYY-NNNNNN`
 - Submitted invoices are immutable
-- No authentication in MVP (do not expose publicly until that gate is closed)
+- Login required (`AUTH_EMAIL` / `AUTH_PASSWORD` / `AUTH_SECRET`)
 
 Full write-up: `docs/ARCHITECTURE.md`.
 
@@ -28,21 +28,23 @@ Full write-up: `docs/ARCHITECTURE.md`.
 4. Save draft and submit
 5. PDF export
 6. Validation and errors
+7. Login
 
 Out of scope: customer CRM, email, payments, accounting, reporting, post-submit edits.
 
 ## Local setup
 
-Requirements: Node 22, Docker (for Postgres).
+Application only. Postgres create/migrate/secrets are owned by the n8n DevOps workflow — see `docs/N8N_DEVOPS_PROMPT.md`.
 
 ```bash
 cp .env.example .env
-docker compose up -d
-npx prisma migrate deploy
+# set AUTH_* and DATABASE_URL (provided by DevOps)
+npm install
+npx prisma generate
 npm run dev
 ```
 
-Open http://localhost:3000
+Open http://localhost:3000 — you will be redirected to `/login`.
 
 ## Commands
 
@@ -63,11 +65,11 @@ Open http://localhost:3000
 - `docs/API.md` + `docs/openapi.yaml` — HTTP contract
 - `docs/RISKS.md` — risks and mitigations
 - `docs/REPOSITORY.md` — tree
+- `docs/N8N_DEVOPS_PROMPT.md` — copy-paste prompt for the n8n DevOps agent
 - `docs/adr/` — decisions
 
 ## Deployment notes
 
-- Set `DATABASE_URL` and seller identity env vars.
-- Run `prisma migrate deploy` before or as part of release.
-- Keep backups of Postgres; submitted invoices are the source of truth for PDFs.
+- DevOps (n8n) owns Postgres, `prisma migrate deploy`, and secret injection.
+- Application agents do not provision databases.
 - Do not merge or deploy without human review.

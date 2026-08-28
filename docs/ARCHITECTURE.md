@@ -11,7 +11,7 @@ Internal, mobile-first web app for creating customer invoices: draft entry, serv
 | Domain | Pure TypeScript in `src/lib` | Same calculation rules for live preview and persistence |
 | DB | PostgreSQL 16 + Prisma 6 | Transactional submit + numbering; Prisma 6 avoids Prisma 7 adapter setup |
 | PDF | `pdf-lib` (Node) | Deterministic, no Chromium |
-| Validation | Zod 4 | Shared request shapes |
+| Auth | Env credentials + HMAC session cookie | Human-confirmed login required ([ADR 0005](./adr/0005-auth.md)) |
 
 ## Components
 
@@ -30,9 +30,10 @@ PostgreSQL
     Invoice + LineItem + InvoiceSequence
 ```
 
-- **Pages:** `/` list, `/invoices/new` create, `/invoices/[id]` edit (draft) or view (submitted).
+- **Pages:** `/login`, `/` list, `/invoices/new` create, `/invoices/[id]` edit (draft) or view (submitted).
 - **API:** see [API.md](./API.md). Handlers are thin; they do not contain tax math.
 - **Company identity:** environment variables, snapshotted onto each invoice.
+- **Auth:** middleware requires a session except `/login` and `POST /api/auth/login`.
 
 ## What this revision changes vs the Planner
 
