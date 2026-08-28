@@ -12,6 +12,11 @@ Internal, mobile-first web app for creating customer invoices: draft entry, serv
 | DB | PostgreSQL 16 + Prisma 6 | Transactional submit + numbering; Prisma 6 avoids Prisma 7 adapter setup |
 | PDF | `pdf-lib` (Node) | Deterministic, no Chromium |
 | Auth | Env credentials + HMAC session cookie | Human-confirmed login required ([ADR 0005](./adr/0005-auth.md)) |
+| Runtime | Railway + `{project_key}.bitbirr.net` | Provisioned by n8n, not by the coding agent |
+| Secrets | Infisical (`https://secrets.jigjigapay.com`) | Source of truth; Railway syncs env from Infisical |
+| Data host | Self-hosted Supabase Postgres (`https://db.jigjigapay.com`) | One database/schema per app; see [N8N_DEVOPS_PROMPT.md](./N8N_DEVOPS_PROMPT.md) |
+
+Architect Agent emits `docs/devops-handoff.json` and stops. n8n continues from that JSON ([ARCHITECT_CONTINUATION.md](./ARCHITECT_CONTINUATION.md)).
 
 ## Components
 
@@ -46,7 +51,7 @@ Disagreed or tightened:
 3. **Integer cents**, not Prisma `Decimal` ([ADR 0003](./adr/0003-money-tax-numbering.md)).
 4. **Customer snapshot on the invoice**, no customer master table (Planner excluded CRM).
 5. **Mobile-first UI** from the #ceo React request.
-6. **Auth is a pre-deploy gate, not MVP code.** Internal tool; no public internet assumption until confirmed.
+6. **Login is required.** Env credentials + session cookie ([ADR 0005](./adr/0005-auth.md)). Provisioning of `AUTH_*` and `COMPANY_*` is n8n/Infisical, not this repo.
 
 ## Out of scope (MVP)
 
