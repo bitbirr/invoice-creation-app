@@ -67,7 +67,10 @@ export async function readSessionEmail(token: string | undefined): Promise<strin
   const mac = token.slice(lastDot + 1);
   const expected = await sign(payload);
   if (!expected || !timingSafeEqual(mac, expected)) return null;
-  const [email, expiryRaw] = payload.split(".");
+  const expiryDot = payload.lastIndexOf(".");
+  if (expiryDot <= 0) return null;
+  const email = payload.slice(0, expiryDot);
+  const expiryRaw = payload.slice(expiryDot + 1);
   const expiry = Number(expiryRaw);
   if (!email || !Number.isFinite(expiry) || expiry < Date.now()) return null;
   if (email !== expectedEmail()) return null;
