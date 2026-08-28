@@ -1,34 +1,23 @@
-import type { Metadata, Viewport } from "next";
+import type { Metadata } from "next";
+import { Geist } from "next/font/google";
+import { AppHeader } from "@/components/app-header";
 import "./globals.css";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
 
 export const metadata: Metadata = {
   title: "Invoice Creation",
-  description: "Internal customer invoice drafts, submission, and PDF export",
+  description: "Internal invoice drafts, submission, and PDF export.",
 };
 
-export const viewport: Viewport = {
-  width: "device-width",
-  initialScale: 1,
-  maximumScale: 1,
-};
-
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en">
-      <body className="min-h-dvh antialiased">
-        <header className="border-b border-stone-200 bg-white">
-          <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
-            <a href="/" className="text-sm font-semibold tracking-tight">
-              Invoice Creation
-            </a>
-            <a
-              href="/invoices/new"
-              className="rounded-full bg-teal-700 px-3 py-1.5 text-sm text-white"
-            >
-              New invoice
-            </a>
-          </div>
-        </header>
+    <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
+      <body className="min-h-full bg-slate-100 font-sans text-slate-900">
+        <AppHeader />
         <main className="mx-auto w-full max-w-3xl px-4 py-6">{children}</main>
       </body>
     </html>
