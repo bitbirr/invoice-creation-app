@@ -1,42 +1,60 @@
 import { NextResponse } from "next/server";
-import { getPrisma } from "@/lib/db";
-import { fromUnknown, jsonError } from "@/lib/http";
-import { createInvoiceService } from "@/lib/invoice-service";
-import { invoiceWriteSchema } from "@/lib/validation";
+import { prisma } from "@/lib/db";
+import { invoiceWriteSchema, jsonError, requireInternalToken } from "@/lib/http";
+import { serializeInvoice, totalsFromWriteInput } from "@/lib/invoice-service";
 
-function requireDb() {
-  const prisma = getPrisma();
-  if (!prisma) {
-    return {
-      error: jsonError(
-        503,
-        "database_unavailable",
-        "DATABASE_URL is not set. Start Postgres (docker compose up -d) and copy .env.example to .env.",
-      ),
-    };
-  }
-  return { service: createInvoiceService(prisma) };
-}
+export async function GET(request: Request) {
+  const unauthorized = requireInternalToken(request);
+  if (unauthorized) return unauthorized;
 
-export async function GET() {
-  const db = requireDb();
-  if ("error" in db && db.error) return db.error;
-  try {
-    return NextResponse.json({ invoices: await db.service!.list() });
-  } catch (error) {
-    return fromUnknown(error);
-  }
+  const invoices = await prisma.invoice.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    include: { lineItems: { orderBy: { position: "asc" } } },
+  });
+  return NextResponse.json({ invoices: invoices.map(serializeInvoice) });
 }
 
 export async function POST(request: Request) {
-  const db = requireDb();
-  if ("error" in db && db.error) return db.error;
+  const unauthorized = requireInternalToken(request);
+  if (unauthorized) return unauthorized;
+
+  const body = await request.json().catch(() => null);
+  const parsed = invoiceWriteSchema.safeParse(body);
+  if (!parsed.success) {
+    return jsonError(400, "validation_error", parsed.error.issues[0]?.message ?? "Invalid payload");
+  }
+
   try {
-    const body = await request.json();
-    const input = invoiceWriteSchema.parse(body);
-    const invoice = await db.service!.createDraft(input);
-    return NextResponse.json({ invoice }, { status: 201 });
+    const totals = totalsFromWriteInput(parsed.data);
+    const invoice = await prisma.invoice.create({
+      data: {
+        status: "draft",
+        issueDate: new Date(parsed.data.issueDate),
+        currency: parsed.data.currency,
+        taxRateBps: parsed.data.taxRateBps,
+        customerName: parsed.data.customerName,
+        customerEmail: parsed.data.customerEmail || null,
+        billingAddress: parsed.data.billingAddress || null,
+        notes: parsed.data.notes || null,
+        subtotalMinor: totals.subtotalMinor,
+        taxMinor: totals.taxMinor,
+        totalMinor: totals.totalMinor,
+        lineItems: {
+          create: totals.lines.map((line) => ({
+            position: line.position,
+            description: line.description,
+            quantityMilli: line.quantityMilli,
+            unitPriceMinor: line.unitPriceMinor,
+            lineTotalMinor: line.lineTotalMinor,
+          })),
+        },
+      },
+      include: { lineItems: { orderBy: { position: "asc" } } },
+    });
+    return NextResponse.json({ invoice: serializeInvoice(invoice) }, { status: 201 });
   } catch (error) {
-    return fromUnknown(error);
+    const message = error instanceof Error ? error.message : "Could not save invoice";
+    return jsonError(400, "domain_error", message);
   }
 }
