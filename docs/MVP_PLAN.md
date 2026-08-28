@@ -1,46 +1,43 @@
 # MVP implementation plan
 
-Phased, each slice shippable (domain → API → UI). Do not start Phase 2 until Phase 0 is explicitly approved.
+Target: the six accepted capabilities — form, line items, calculations, draft/submit, PDF, validation. Estimate remains 2–3 weeks **after** humans confirm the open domain gates in Phase 0.
 
-## Phase 0 — Decision gate (day 0–1)
+## Phase 0 — Human gates (before treating invoices as real)
 
-- Confirm standalone build (ADR-0001). Provide Supplier Invoice Tracker source if reuse should still be evaluated.
-- Approve money/tax/numbering/immutability (ADR-0003).
-- Approve auth minimum: empty token for LAN/VPN vs `INTERNAL_APP_TOKEN` vs later SSO.
-- Approve default currency and tax bps.
+Timebox: half day.
 
-## Phase 1 — Foundation (days 1–2) — this PR
+- [ ] Confirm standalone app vs extend Supplier Invoice Tracker ([ADR 0001](./adr/0001-reuse-decision.md)).
+- [ ] Confirm currency (`EUR` default), tax rate (`21%` default), and that integer quantities are acceptable.
+- [ ] Confirm submitted invoices are immutable (no void/credit-note in MVP).
+- [ ] Confirm access model: internal-only unauthenticated MVP vs required login before any deploy.
+- [ ] Confirm seller identity fields for the PDF.
 
-- Next.js + Tailwind + Prisma + docker-compose Postgres
-- Domain money/totals/lifecycle + tests
-- OpenAPI contract and ADRs
-- CI: `npm test` + `tsc`
+This scaffold implements the defaults so engineering can continue; production use waits on the checks above.
 
-## Phase 2 — Persistence and lifecycle (days 2–5)
+## Phase 1 — Foundation (this PR)
 
-- Apply migration to a real database
-- Seed a single issuer profile
-- Harden submit: transaction, sequence row lock, idempotent re-submit of an already-submitted invoice
-- Optimistic concurrency via `version`
+- Repository conventions, README, ADRs, CI (lint / typecheck / unit tests).
+- Prisma schema + initial migration.
+- Shared money/tax/lifecycle unit tests.
+- HTTP contract and Route Handlers.
+- Mobile-first draft form, list, submit, PDF download.
+- Docker Compose Postgres for local dev.
 
-## Phase 3 — Creation workflow UI (days 4–8)
+**Done when:** `npm test`, `npm run lint`, and `npm run typecheck` pass; with Postgres up, a user can create a draft, submit, and download a PDF.
 
-- Mobile-first form polish (delete line, better errors, disabled submit while in-flight)
-- Draft list and detail
-- Server error mapping to field-level messages
+## Phase 2 — Hardening (next PR)
 
-## Phase 4 — PDF export (days 7–10)
+- Playwright (or similar) e2e: create → edit → submit → PDF; double-submit; version conflict.
+- Boundary tests already in Vitest expanded for large line counts and long descriptions in PDF pagination.
+- Backup/restore and migration notes for the chosen host.
+- Optional basic auth / SSO **only if Phase 0 requires it**.
 
-- Replace the placeholder letterhead with approved issuer details
-- Pagination, long descriptions, 50+ line items
-- Golden-file or hash test against a fixture snapshot
+## Phase 3 — Release
 
-## Phase 5 — Harden and handoff (days 10–15)
+- Production Postgres, env for seller identity, CI green on main after human merge.
+- Acceptance against only the six capabilities.
+- Revisit 2–3 week / $3k–$5k estimates if Phase 0 changed tax, numbering, or auth.
 
-- Boundary tests for rounding, tax=0, max lines, concurrent submit
-- README deploy notes (VPS/Traefik or Railway)
-- Do not merge to main or deploy without human approval
+## Explicitly not scheduled
 
-## Explicitly not in this MVP
-
-Payments, emailing PDFs, accounting export, customer directory, multi-entity, multi-tax, recurring invoices, dashboard analytics.
+Email, payments, customer master data, accounting integrations, dashboards, multi-entity tax packs.
