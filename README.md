@@ -1,38 +1,48 @@
 # Invoice Creation App
 
-Internal app for drafting, submitting, and (later) exporting customer invoices as PDF.
+Internal customer invoicing: capture billing details and line items, save drafts, submit an immutable snapshot, and export a PDF from **server-persisted** totals.
 
-**Stack:** Next.js 15 (App Router) · React 19 · PostgreSQL 16 · Prisma · decimal.js
+**Repository:** `bitbirr/invoice-creation-app`
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for architecture, MVP plan, schema, API, and risks.
+## Architecture decision
 
-## Quick start
+Standalone **Next.js (App Router) + TypeScript + PostgreSQL + Prisma** web app. Mobile-first UI. Money is integer minor units. Tax is integer basis points. Submitted invoices are immutable. PDF is generated from persisted data, not from the browser.
+
+See `docs/ARCHITECTURE.md` for the full picture. ADRs live in `docs/adr/`.
+
+## Local setup
 
 ```bash
 cp .env.example .env
-npm install
 docker compose up -d
-npx prisma generate
+npm install
 npx prisma migrate deploy
+npx prisma generate
 npm test
 npm run dev
 ```
 
-- UI: http://localhost:3000
-- New invoice (mobile-first form): http://localhost:3000/invoices/new
-- Health: http://localhost:3000/api/health
+Open http://localhost:3000
 
-Totals preview works without Postgres (`POST /api/invoices/preview`). Saving a draft requires the database.
+If `INTERNAL_APP_TOKEN` is set, API calls must send `Authorization: Bearer <token>`. Leave it empty for local development.
 
-## Scripts
+## What is in MVP
+
+- Invoice form: customer/billing fields + repeating line items
+- Draft save and explicit submit
+- Server-authoritative line/subtotal/tax/total
+- PDF export
+- Validation and actionable errors
+
+## What is out of MVP
+
+Accounting integrations, payments, email sending, customer master data, advanced tax regimes, reporting dashboards.
+
+## Commands
 
 | Command | Purpose |
 | --- | --- |
-| `npm test` | Calculation policy tests |
-| `npm run lint` | ESLint |
 | `npm run dev` | Next.js dev server |
-| `npm run db:up` | Local Postgres |
-
-## Out of scope (MVP)
-
-Accounting integrations, payments, email delivery, customer master data, and multi-entity tax.
+| `npm test` | Domain calculation and lifecycle tests |
+| `npm run lint` | ESLint |
+| `npx prisma migrate dev` | Create/apply migrations |

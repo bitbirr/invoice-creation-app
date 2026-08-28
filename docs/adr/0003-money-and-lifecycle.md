@@ -1,37 +1,27 @@
-# ADR 0003: Money, tax, numbering, and lifecycle
+# ADR-0003: Integer money, submit immutability, numbering
 
-- Status: Proposed (numeric policy needs human confirmation)
-- Date: 2026-08-28
+Date: 2026-08-28
+Status: Proposed
+
+## Context
+
+Incorrect rounding or post-submit edits make PDFs unreproducible and totals untrustworthy. Planner asked for decimal-safe arithmetic, lifecycle rules, and snapshots.
 
 ## Decision
 
-### Money
-
-- Compute with `decimal.js` (`ROUND_HALF_UP`).
-- Persist `DECIMAL(19,4)`; **expose and round to 2 decimal places**.
-- API JSON uses decimal strings, never floats.
-
-### Line and tax math
-
-1. `lineTotal = round(quantity * unitPrice, 2)`
-2. `subtotal = sum(lineTotal)`
-3. `taxTotal = round(subtotal * taxRateBps / 10000, 2)`
-4. `grandTotal = subtotal + taxTotal`
-
-Default tax rate: **1500 bps (15%)**. Stored per invoice so later issuer-default changes do not rewrite history.
-
-### Lifecycle
-
-```
-DRAFT -> SUBMITTED -> VOID
-```
-
-- Drafts are editable (PATCH) and have no public `invoiceNumber`.
-- Submit assigns `INV-YYYY-NNNN`, snapshots totals, sets `submittedAt`. Repeat submit is idempotent.
-- Submitted rows are immutable. Corrections: VOID with reason, then a new invoice.
-- `version` is incremented on each write; stale PATCH/submit returns 409.
+1. Store money as `BIGINT` minor units. Default currency ETB with 2 minor digits. Never use IEEE floats for money.
+2. Store quantity as integer milli-units (3 decimal places).
+3. Store tax as integer basis points on the invoice, not per line, in MVP.
+4. Round half-up to the minor unit using `bigint` division in `src/lib/money.ts`.
+5. Drafts are mutable. Submit recomputes totals from stored lines, assigns `INV-YYYY-NNNN`, writes a JSON snapshot, and freezes the row. PATCH after submit is rejected.
+6. Invoice numbers are unique. Sequence increment happens in the submit transaction.
 
 ## Consequences
 
-- Changing rounding or tax after invoices exist requires a new ADR and must not rewrite submitted snapshots.
-- Vitest in `src/lib/invoice-calc.test.ts` is the executable spec for the math.
+- Application code must convert at the HTTP boundary (`"12.50"` ↔ `1250n`).
+- Changing tax policy (per-line tax, exemptions) requires a schema additive change.
+- Void/reissue is the correction path; it is enum-ready (`voided`) but has no UI until product approves it.
+
+## Test gates
+
+`src/lib/money.test.ts` covers line rounding, tax bps, totals, and lifecycle guards. Phase 4 adds PDF snapshot tests.
