@@ -1,60 +1,95 @@
 # API design
 
-Base path: `/api`. JSON in and out. Amounts over the wire are **decimal strings in major units** on write (`"12.50"`) and **decimal strings of minor units** on read (`subtotalMinor: "1250"`) until the OpenAPI examples are implemented in clients. Current handlers serialize persisted minor units as strings to avoid JSON number precision loss.
+Base path: `/api`. JSON only (`Content-Type: application/json`) except PDF (`application/pdf`).
 
-Optional header: `Authorization: Bearer <INTERNAL_APP_TOKEN>` when the env var is set.
+No existing Postman/OpenAPI contract was available; this is the source of truth. Machine-readable copy: [openapi.yaml](./openapi.yaml).
 
-Idempotency: `Idempotency-Key` on `POST /api/invoices/{id}/submit`. Re-submitting an already submitted invoice returns the existing invoice (no second number).
+## Envelope
+
+Success:
+
+```json
+{ "data": { } }
+```
+
+Error:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_FAILED",
+    "message": "Fix the highlighted fields.",
+    "fields": { "customerName": "Customer name is required." }
+  }
+}
+```
+
+`fields` is omitted when the error is not field-scoped.
+
+## Status codes
+
+| Code | When |
+| --- | --- |
+| 200 | GET, PATCH, idempotent submit |
+| 201 | POST create |
+| 400 | Validation / malformed JSON |
+| 404 | Unknown invoice id |
+| 409 | `VERSION_CONFLICT` or update of a submitted invoice (`INVOICE_IMMUTABLE`) |
+| 500 | Persistence or PDF failure (draft data is not deleted) |
 
 ## Endpoints
 
 ### `GET /api/invoices`
 
-List latest 50 invoices, newest first.
+List newest first. Optional `?status=DRAFT|SUBMITTED`.
+
+Response `data`: `{ invoices: InvoiceSummary[] }`.
 
 ### `POST /api/invoices`
 
-Create a **draft**. Server computes totals.
+Create a **draft**. Body: `InvoiceWrite` (no `version`). Totals computed on the server.
 
-```json
-{
-  "customerName": "Acme Trading",
-  "customerEmail": "ap@acme.example",
-  "billingAddress": "Bole, Addis Ababa",
-  "issueDate": "2026-08-28",
-  "currency": "ETB",
-  "taxRateBps": 0,
-  "notes": "",
-  "lines": [
-    { "description": "On-site networking", "quantity": "2", "unitPrice": "1500.00" }
-  ]
-}
-```
-
-`201` with `{ invoice }`. Client-supplied totals are ignored if present.
+Response `201` `data`: `Invoice`.
 
 ### `GET /api/invoices/{id}`
 
-Single invoice including line items.
+Full invoice including line items.
 
 ### `PATCH /api/invoices/{id}`
 
-Replace draft fields and lines. Rejects `status != draft` (`400`) and stale `version` (`409`).
+Update a draft. Body: `InvoiceWrite` **plus** `version`. Replaces line items as a set.
+
+Rejected if status is `SUBMITTED` or `version` does not match.
 
 ### `POST /api/invoices/{id}/submit`
 
-Body: `{ "version": 1 }`. Assigns `invoice_number`, recomputes totals from stored lines, writes `snapshot`, sets `submitted`.
+Body: `{ "version": number }`.
+
+- Validates submit rules, recomputes totals, snapshots seller, assigns number, sets `SUBMITTED`.
+- If already submitted: **200** with the existing invoice (idempotent).
 
 ### `GET /api/invoices/{id}/pdf`
 
-`application/pdf` attachment generated from persisted data.
+PDF generated from the **persisted** row. Drafts are watermarked `DRAFT`. Filename: `{number or DRAFT}-{id}.pdf`.
 
-## Error shape
+## Shared shapes
 
-```json
-{ "error": { "code": "validation_error", "message": "quantity must be greater than zero" } }
+`InvoiceWrite`:
+
+```ts
+{
+  customerName: string
+  customerEmail?: string | null
+  customerAddress?: string | null
+  notes?: string | null
+  lineItems: {
+    description: string
+    quantity: number        // integer ≥ 1
+    unitPriceCents: number  // integer ≥ 0
+  }[]
+}
 ```
 
-Codes: `validation_error`, `domain_error`, `not_found`, `unauthorized`.
+`Invoice` includes those fields plus `id`, `status`, `number`, `currency`, `taxRateBps`, seller snapshot, cents totals, `version`, timestamps, and `lineItems` with `id`, `position`, `lineTotalCents`.
 
-Machine-readable contract: `docs/openapi.yaml`.
+Client preview **must** use `src/lib/invoice-calc.ts` and **must not** send totals; the server ignores any total fields.

@@ -1,15 +1,13 @@
-name: CI
+name: ci
 
 on:
   push:
-    branches: [main, feat/**]
+    branches: [main]
   pull_request:
 
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
-    env:
-      DATABASE_URL: postgresql://invoice:invoice@localhost:5432/invoice_creation?schema=invoice
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,5 +16,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
+      - run: npm run lint
+      - run: npm run typecheck
       - run: npm test
-      - run: npx tsc --noEmit
