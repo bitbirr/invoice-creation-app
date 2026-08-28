@@ -1,24 +1,35 @@
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { getSessionCookieName, readSessionEmail } from "@/lib/auth";
 
-export function middleware(request: NextRequest) {
-  const secret = process.env.INTERNAL_APP_SECRET;
-  if (!secret) return NextResponse.next();
+const PUBLIC_PATHS = new Set(["/login", "/api/auth/login"]);
 
-  const provided =
-    request.headers.get("x-internal-app-secret") ??
-    request.cookies.get("internal_app_secret")?.value;
+export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  if (PUBLIC_PATHS.has(pathname)) {
+    return NextResponse.next();
+  }
 
-  if (provided !== secret) {
+  const token = request.cookies.get(getSessionCookieName())?.value;
+  const email = await readSessionEmail(token);
+
+  if (email) {
+    return NextResponse.next();
+  }
+
+  if (pathname.startsWith("/api/")) {
     return NextResponse.json(
-      { error: { code: "unauthorized", message: "Internal access required" } },
+      { error: { code: "UNAUTHENTICATED", message: "Login required." } },
       { status: 401 },
     );
   }
 
-  return NextResponse.next();
+  const loginUrl = request.nextUrl.clone();
+  loginUrl.pathname = "/login";
+  loginUrl.search = "";
+  loginUrl.searchParams.set("next", pathname);
+  return NextResponse.redirect(loginUrl);
 }
 
 export const config = {
-  matcher: ["/api/:path*"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

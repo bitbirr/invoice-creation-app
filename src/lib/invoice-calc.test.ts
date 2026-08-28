@@ -11,8 +11,8 @@ describe("roundHalfUpToInt", () => {
     expect(roundHalfUpToInt(0, 10)).toBe(0);
   });
 
-  it("computes 21% tax on 100.00 as 21.00", () => {
-    expect(roundHalfUpToInt(10000 * 2100, 10_000)).toBe(2100);
+  it("computes Ethiopian 15% VAT on 100.00 as 15.00", () => {
+    expect(roundHalfUpToInt(10000 * 1500, 10_000)).toBe(1500);
   });
 
   it("rounds 0.005 EUR half up to 0.01", () => {
@@ -43,12 +43,12 @@ describe("calculateInvoice", () => {
         { description: "Hours", quantity: 3, unitPriceCents: 1999 },
         { description: "Parts", quantity: 2, unitPriceCents: 50 },
       ],
-      2100,
+      1500,
     );
     expect(result.lineItems[0]?.lineTotalCents).toBe(5997);
     expect(result.subtotalCents).toBe(6097);
-    expect(result.taxCents).toBe(1280); // 6097 * 0.21 = 1280.37 → 1280
-    expect(result.totalCents).toBe(7377);
+    expect(result.taxCents).toBe(915); // 6097 * 0.15 = 914.55 → 915
+    expect(result.totalCents).toBe(7012);
   });
 
   it("allows zero-price lines and zero tax", () => {

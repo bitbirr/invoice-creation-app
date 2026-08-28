@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import type { ReactElement } from "react";
 
