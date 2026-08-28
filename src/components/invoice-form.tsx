@@ -1,211 +1,369 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  createInvoiceRequest,
+  submitInvoiceRequest,
+  updateInvoiceRequest,
+  type ApiError,
+} from "@/lib/api";
 import { calculateInvoice } from "@/lib/invoice-calc";
+import { centsToInput, formatCents, parseMoneyToCents } from "@/lib/money";
+import type { InvoiceDTO } from "@/server/invoices";
 
-type Line = { description: string; quantity: string; unitPrice: string };
+type DraftLine = {
+  key: string;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+};
 
-const emptyLine = (): Line => ({ description: "", quantity: "1", unitPrice: "0.00" });
+function newLine(): DraftLine {
+  return {
+    key: crypto.randomUUID(),
+    description: "",
+    quantity: "1",
+    unitPrice: "0.00",
+  };
+}
 
-export function InvoiceForm() {
-  const [customerName, setCustomerName] = useState("");
-  const [customerEmail, setCustomerEmail] = useState("");
-  const [billingAddress, setBillingAddress] = useState("");
-  const [taxRateBps, setTaxRateBps] = useState(1500);
-  const [lines, setLines] = useState<Line[]>([emptyLine()]);
-  const [status, setStatus] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+function linesFromInvoice(invoice: InvoiceDTO | null): DraftLine[] {
+  if (!invoice || invoice.lineItems.length === 0) {
+    return [newLine()];
+  }
+  return invoice.lineItems.map((line) => ({
+    key: line.id,
+    description: line.description,
+    quantity: String(line.quantity),
+    unitPrice: centsToInput(line.unitPriceCents),
+  }));
+}
 
-  const totals = useMemo(() => {
+type Props = {
+  invoice: InvoiceDTO | null;
+  defaultCurrency: string;
+  defaultTaxRateBps: number;
+};
+
+export function InvoiceForm({ invoice, defaultCurrency, defaultTaxRateBps }: Props) {
+  const router = useRouter();
+  const [savedInvoice, setSavedInvoice] = useState(invoice);
+  const submitted = savedInvoice?.status === "SUBMITTED";
+  const [customerName, setCustomerName] = useState(invoice?.customerName ?? "");
+  const [customerEmail, setCustomerEmail] = useState(invoice?.customerEmail ?? "");
+  const [customerAddress, setCustomerAddress] = useState(invoice?.customerAddress ?? "");
+  const [notes, setNotes] = useState(invoice?.notes ?? "");
+  const [lines, setLines] = useState<DraftLine[]>(() => linesFromInvoice(invoice));
+  const [fields, setFields] = useState<Record<string, string>>({});
+  const [banner, setBanner] = useState<string | null>(null);
+  const [pending, setPending] = useState<"save" | "submit" | null>(null);
+
+  const currency = savedInvoice?.currency ?? defaultCurrency;
+  const taxRateBps = savedInvoice?.taxRateBps ?? defaultTaxRateBps;
+
+  const preview = useMemo(() => {
+    const parsed = lines.map((line) => ({
+      description: line.description,
+      quantity: Number.parseInt(line.quantity, 10),
+      unitPriceCents: parseMoneyToCents(line.unitPrice) ?? 0,
+    }));
+    const usable = parsed.filter(
+      (line) =>
+        Number.isInteger(line.quantity) &&
+        line.quantity >= 1 &&
+        Number.isInteger(line.unitPriceCents) &&
+        line.unitPriceCents >= 0,
+    );
     try {
-      const valid = lines.filter((line) => line.description.trim().length > 0);
-      if (valid.length === 0) {
-        return { subtotal: "0.00", taxTotal: "0.00", grandTotal: "0.00" };
-      }
-      return calculateInvoice({ taxRateBps, lineItems: valid });
+      return calculateInvoice(usable, taxRateBps);
     } catch {
-      return { subtotal: "—", taxTotal: "—", grandTotal: "—" };
+      return null;
     }
   }, [lines, taxRateBps]);
 
-  function updateLine(index: number, patch: Partial<Line>) {
-    setLines((current) => current.map((line, i) => (i === index ? { ...line, ...patch } : line)));
+  function buildBody() {
+    const fieldMap: Record<string, string> = {};
+    const lineItems = lines.map((line, index) => {
+      const quantity = Number.parseInt(line.quantity, 10);
+      const unitPriceCents = parseMoneyToCents(line.unitPrice);
+      if (!Number.isInteger(quantity) || quantity < 1) {
+        fieldMap[`lineItems.${index}.quantity`] = "Quantity must be a whole number of at least 1.";
+      }
+      if (unitPriceCents == null) {
+        fieldMap[`lineItems.${index}.unitPriceCents`] = "Enter a price like 12.50.";
+      }
+      return {
+        description: line.description,
+        quantity: Number.isInteger(quantity) ? quantity : 0,
+        unitPriceCents: unitPriceCents ?? -1,
+      };
+    });
+    if (Object.keys(fieldMap).length > 0) {
+      setFields(fieldMap);
+      throw new Error("client-validation");
+    }
+    return {
+      customerName,
+      customerEmail: customerEmail.trim() === "" ? null : customerEmail,
+      customerAddress: customerAddress.trim() === "" ? null : customerAddress,
+      notes: notes.trim() === "" ? null : notes,
+      lineItems,
+    };
   }
 
-  async function submit(as: "draft" | "submitted") {
-    setBusy(true);
-    setStatus(null);
+  function showError(error: ApiError) {
+    setFields(error.fields ?? {});
+    setBanner(error.message);
+  }
+
+  async function persistDraft() {
+    const body = buildBody();
+    if (savedInvoice) {
+      return updateInvoiceRequest(savedInvoice.id, { ...body, version: savedInvoice.version });
+    }
+    return createInvoiceRequest(body);
+  }
+
+  async function onSave() {
+    setPending("save");
+    setBanner(null);
+    setFields({});
     try {
-      const payload = {
-        customerName,
-        customerEmail,
-        billingAddress,
-        taxRateBps,
-        currency: "ETB",
-        lineItems: lines.filter((line) => line.description.trim().length > 0),
-      };
-      const createResponse = await fetch("/api/invoices", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const created = await createResponse.json();
-      if (!createResponse.ok) {
-        setStatus(created.error?.message ?? "Could not save invoice");
+      const saved = await persistDraft();
+      setSavedInvoice(saved);
+      if (!invoice) {
+        router.replace(`/invoices/${saved.id}`);
+        router.refresh();
         return;
       }
-      if (as === "draft") {
-        setStatus(`Draft saved (${created.invoice.id})`);
-        return;
+      router.refresh();
+    } catch (error) {
+      if ((error as Error).message !== "client-validation") {
+        showError(error as ApiError);
       }
-      const submitResponse = await fetch(`/api/invoices/${created.invoice.id}/submit`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ version: created.invoice.version }),
-      });
-      const submitted = await submitResponse.json();
-      if (!submitResponse.ok) {
-        setStatus(submitted.error?.message ?? "Saved as draft, but submit failed");
-        return;
-      }
-      setStatus(`Submitted as ${submitted.invoice.invoiceNumber}`);
-    } catch {
-      setStatus("Network error");
     } finally {
-      setBusy(false);
+      setPending(null);
     }
   }
 
+  async function onSubmit() {
+    setPending("submit");
+    setBanner(null);
+    setFields({});
+    try {
+      const saved = await persistDraft();
+      const submittedInvoice = await submitInvoiceRequest(saved.id, saved.version);
+      setSavedInvoice(submittedInvoice);
+      router.replace(`/invoices/${submittedInvoice.id}`);
+      router.refresh();
+    } catch (error) {
+      if ((error as Error).message !== "client-validation") {
+        showError(error as ApiError);
+      }
+    } finally {
+      setPending(null);
+    }
+  }
+
+  const inputClass =
+    "mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-base text-slate-900 outline-none focus:border-teal-600 focus:ring-2 focus:ring-teal-600/20 disabled:bg-slate-100";
+
   return (
     <form
-      className="space-y-6 pb-28"
+      className="space-y-6 pb-36"
       onSubmit={(event) => {
         event.preventDefault();
-        void submit("draft");
       }}
     >
-      <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+      {banner ? (
+        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+          {banner}
+        </p>
+      ) : null}
+
+      {submitted ? (
+        <p className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-900">
+          Submitted as <strong>{savedInvoice?.number}</strong>. Totals are locked. You can still download the PDF.
+        </p>
+      ) : null}
+
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Customer</h2>
-        <label className="block text-sm">
+        <label className="mt-3 block text-sm font-medium text-slate-700">
           Name
           <input
-            required
+            className={inputClass}
             value={customerName}
+            disabled={submitted}
+            autoComplete="organization"
             onChange={(event) => setCustomerName(event.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
           />
+          {fields.customerName ? <span className="text-sm text-red-700">{fields.customerName}</span> : null}
         </label>
-        <label className="block text-sm">
+        <label className="mt-3 block text-sm font-medium text-slate-700">
           Email
           <input
+            className={inputClass}
             type="email"
             value={customerEmail}
+            disabled={submitted}
+            autoComplete="email"
             onChange={(event) => setCustomerEmail(event.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
           />
+          {fields.customerEmail ? <span className="text-sm text-red-700">{fields.customerEmail}</span> : null}
         </label>
-        <label className="block text-sm">
+        <label className="mt-3 block text-sm font-medium text-slate-700">
           Billing address
           <textarea
-            value={billingAddress}
-            onChange={(event) => setBillingAddress(event.target.value)}
-            rows={3}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+            className={`${inputClass} min-h-24`}
+            value={customerAddress}
+            disabled={submitted}
+            onChange={(event) => setCustomerAddress(event.target.value)}
           />
         </label>
       </section>
 
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-            Line items
-          </h2>
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Line items</h2>
+          {fields.lineItems ? <span className="text-sm text-red-700">{fields.lineItems}</span> : null}
+        </div>
+        <ul className="mt-3 space-y-4">
+          {lines.map((line, index) => (
+            <li key={line.key} className="rounded-lg border border-slate-200 p-3">
+              <label className="block text-sm font-medium text-slate-700">
+                Description
+                <input
+                  className={inputClass}
+                  value={line.description}
+                  disabled={submitted}
+                  onChange={(event) => {
+                    const next = [...lines];
+                    next[index] = { ...line, description: event.target.value };
+                    setLines(next);
+                  }}
+                />
+                {fields[`lineItems.${index}.description`] ? (
+                  <span className="text-sm text-red-700">{fields[`lineItems.${index}.description`]}</span>
+                ) : null}
+              </label>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <label className="block text-sm font-medium text-slate-700">
+                  Qty
+                  <input
+                    className={inputClass}
+                    inputMode="numeric"
+                    value={line.quantity}
+                    disabled={submitted}
+                    onChange={(event) => {
+                      const next = [...lines];
+                      next[index] = { ...line, quantity: event.target.value };
+                      setLines(next);
+                    }}
+                  />
+                  {fields[`lineItems.${index}.quantity`] ? (
+                    <span className="text-sm text-red-700">{fields[`lineItems.${index}.quantity`]}</span>
+                  ) : null}
+                </label>
+                <label className="block text-sm font-medium text-slate-700">
+                  Unit price
+                  <input
+                    className={inputClass}
+                    inputMode="decimal"
+                    value={line.unitPrice}
+                    disabled={submitted}
+                    onChange={(event) => {
+                      const next = [...lines];
+                      next[index] = { ...line, unitPrice: event.target.value };
+                      setLines(next);
+                    }}
+                  />
+                  {fields[`lineItems.${index}.unitPriceCents`] ? (
+                    <span className="text-sm text-red-700">{fields[`lineItems.${index}.unitPriceCents`]}</span>
+                  ) : null}
+                </label>
+              </div>
+              {!submitted ? (
+                <button
+                  type="button"
+                  className="mt-3 text-sm font-medium text-red-700"
+                  onClick={() => setLines(lines.filter((_, lineIndex) => lineIndex !== index))}
+                  disabled={lines.length === 1}
+                >
+                  Remove item
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+        {!submitted ? (
           <button
             type="button"
-            onClick={() => setLines((current) => [...current, emptyLine()])}
-            className="text-sm font-medium text-blue-700"
+            className="mt-4 w-full rounded-lg border border-dashed border-slate-400 py-3 text-sm font-medium text-slate-700"
+            onClick={() => setLines([...lines, newLine()])}
           >
-            Add line
+            Add line item
           </button>
-        </div>
-        {lines.map((line, index) => (
-          <div key={index} className="space-y-2 rounded-xl border border-slate-200 bg-white p-4">
-            <input
-              placeholder="Description"
-              value={line.description}
-              onChange={(event) => updateLine(index, { description: event.target.value })}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            />
-            <div className="grid grid-cols-2 gap-2">
-              <label className="text-sm">
-                Qty
-                <input
-                  inputMode="decimal"
-                  value={line.quantity}
-                  onChange={(event) => updateLine(index, { quantity: event.target.value })}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-                />
-              </label>
-              <label className="text-sm">
-                Unit price
-                <input
-                  inputMode="decimal"
-                  value={line.unitPrice}
-                  onChange={(event) => updateLine(index, { unitPrice: event.target.value })}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-                />
-              </label>
-            </div>
-            {lines.length > 1 ? (
-              <button
-                type="button"
-                onClick={() => setLines((current) => current.filter((_, i) => i !== index))}
-                className="text-sm text-red-700"
-              >
-                Remove
-              </button>
-            ) : null}
-          </div>
-        ))}
+        ) : null}
       </section>
 
-      <label className="block text-sm">
-        Tax rate (basis points, 1500 = 15%)
-        <input
-          type="number"
-          min={0}
-          max={10000}
-          value={taxRateBps}
-          onChange={(event) => setTaxRateBps(Number(event.target.value))}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
-        />
-      </label>
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <label className="block text-sm font-medium text-slate-700">
+          Notes
+          <textarea
+            className={`${inputClass} min-h-20`}
+            value={notes}
+            disabled={submitted}
+            onChange={(event) => setNotes(event.target.value)}
+          />
+        </label>
+      </section>
 
-      {status ? <p className="rounded-lg bg-slate-100 px-3 py-2 text-sm">{status}</p> : null}
-
-      <div className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white/95 p-4 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-3">
-          <div className="text-sm">
-            <div className="text-slate-500">Grand total</div>
-            <div className="text-lg font-semibold">ETB {totals.grandTotal}</div>
+      <div className="fixed inset-x-0 bottom-0 border-t border-slate-200 bg-white/95 p-4 backdrop-blur md:static md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
+        <dl className="mx-auto flex max-w-3xl flex-col gap-1 text-sm text-slate-700">
+          <div className="flex justify-between">
+            <dt>Subtotal</dt>
+            <dd>{preview ? formatCents(preview.subtotalCents, currency) : "—"}</dd>
           </div>
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              disabled={busy}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium"
-            >
-              Save draft
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void submit("submitted")}
-              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white"
-            >
-              Submit
-            </button>
+          <div className="flex justify-between">
+            <dt>Tax ({(taxRateBps / 100).toFixed(2)}%)</dt>
+            <dd>{preview ? formatCents(preview.taxCents, currency) : "—"}</dd>
           </div>
+          <div className="flex justify-between text-base font-semibold text-slate-900">
+            <dt>Total</dt>
+            <dd>{preview ? formatCents(preview.totalCents, currency) : "—"}</dd>
+          </div>
+        </dl>
+        <div className="mx-auto mt-3 flex max-w-3xl gap-3">
+          {savedInvoice ? (
+            <a
+              className="flex-1 rounded-lg border border-slate-300 py-3 text-center text-sm font-semibold text-slate-800"
+              href={`/api/invoices/${savedInvoice.id}/pdf`}
+            >
+              Download PDF
+            </a>
+          ) : null}
+          {!submitted ? (
+            <>
+              <button
+                type="button"
+                className="flex-1 rounded-lg border border-slate-300 py-3 text-sm font-semibold text-slate-800 disabled:opacity-50"
+                onClick={onSave}
+                disabled={pending !== null}
+              >
+                {pending === "save" ? "Saving…" : "Save draft"}
+              </button>
+              <button
+                type="button"
+                className="flex-1 rounded-lg bg-teal-700 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                onClick={onSubmit}
+                disabled={pending !== null}
+              >
+                {pending === "submit" ? "Submitting…" : "Submit"}
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
     </form>

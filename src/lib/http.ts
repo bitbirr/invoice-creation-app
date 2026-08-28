@@ -1,39 +1,45 @@
-import { NextResponse } from "next/server";
-import { z } from "zod";
+export class DomainError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly fields?: Record<string, string>;
 
-const lineSchema = z.object({
-  description: z.string().trim().min(1).max(500),
-  quantity: z.string().trim().min(1),
-  unitPrice: z.string().trim().min(1),
-});
-
-export const invoiceWriteSchema = z.object({
-  customerName: z.string().trim().min(1).max(200),
-  customerEmail: z.string().trim().max(320).optional(),
-  billingAddress: z.string().trim().max(2000).optional(),
-  notes: z.string().trim().max(4000).optional(),
-  issueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  currency: z.string().length(3).default("ETB"),
-  taxRateBps: z.number().int().min(0).max(10_000),
-  version: z.number().int().positive().optional(),
-  lines: z.array(lineSchema).min(1).max(100),
-});
-
-export type InvoiceWriteInput = z.infer<typeof invoiceWriteSchema>;
-
-export function jsonError(status: number, code: string, message: string) {
-  return NextResponse.json({ error: { code, message } }, { status });
+  constructor(
+    code: string,
+    message: string,
+    status = 400,
+    fields?: Record<string, string>,
+  ) {
+    super(message);
+    this.name = "DomainError";
+    this.code = code;
+    this.status = status;
+    this.fields = fields;
+  }
 }
 
-export function requireInternalToken(request: Request): NextResponse | null {
-  const expected = process.env.INTERNAL_APP_TOKEN;
-  if (!expected) {
-    return null;
+export function jsonError(
+  status: number,
+  code: string,
+  message: string,
+  fields?: Record<string, string>,
+) {
+  return Response.json(
+    { error: { code, message, ...(fields ? { fields } : {}) } },
+    { status },
+  );
+}
+
+export function jsonOk(data: unknown, status = 200) {
+  return Response.json({ data }, { status });
+}
+
+export function handleRouteError(error: unknown) {
+  if (error instanceof DomainError) {
+    return jsonError(error.status, error.code, error.message, error.fields);
   }
-  const header = request.headers.get("authorization") ?? "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
-  if (token !== expected) {
-    return jsonError(401, "unauthorized", "Missing or invalid bearer token");
+  if (error instanceof SyntaxError) {
+    return jsonError(400, "INVALID_JSON", "Request body must be valid JSON.");
   }
-  return null;
+  console.error(error);
+  return jsonError(500, "INTERNAL_ERROR", "Something went wrong. Your data was not changed.");
 }

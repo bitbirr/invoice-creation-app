@@ -1,74 +1,97 @@
 import { describe, expect, it } from "vitest";
 import { calculateInvoice } from "./invoice-calc";
-import { MoneyError } from "./money";
+import { centsToInput, parseMoneyToCents, roundHalfUpToInt } from "./money";
+import { formatInvoiceNumber } from "./numbering";
+import { fieldErrors, invoiceSubmitSchema, invoiceWriteSchema } from "./validation";
+
+describe("roundHalfUpToInt", () => {
+  it("rounds .5 up for positive money", () => {
+    expect(roundHalfUpToInt(15, 10)).toBe(2);
+    expect(roundHalfUpToInt(14, 10)).toBe(1);
+    expect(roundHalfUpToInt(0, 10)).toBe(0);
+  });
+
+  it("computes 21% tax on 100.00 as 21.00", () => {
+    expect(roundHalfUpToInt(10000 * 2100, 10_000)).toBe(2100);
+  });
+
+  it("rounds 0.005 EUR half up to 0.01", () => {
+    // 1 cent * 50% = 0.5 cent → 1
+    expect(roundHalfUpToInt(1 * 5000, 10_000)).toBe(1);
+  });
+});
+
+describe("parseMoneyToCents", () => {
+  it("parses dotted and comma decimals", () => {
+    expect(parseMoneyToCents("12.5")).toBe(1250);
+    expect(parseMoneyToCents("12,50")).toBe(1250);
+    expect(parseMoneyToCents("0.09")).toBe(9);
+    expect(parseMoneyToCents("abc")).toBeNull();
+    expect(parseMoneyToCents("12.345")).toBeNull();
+  });
+
+  it("round-trips through centsToInput", () => {
+    expect(centsToInput(1250)).toBe("12.50");
+    expect(parseMoneyToCents(centsToInput(9))).toBe(9);
+  });
+});
 
 describe("calculateInvoice", () => {
-  it("computes line totals, 15% tax, and grand total", () => {
-    const result = calculateInvoice({
-      taxRateBps: 1500,
-      lineItems: [
-        { description: "Consulting", quantity: "2", unitPrice: "100.00" },
-        { description: "Travel", quantity: "1", unitPrice: "50.00" },
+  it("multiplies quantity and unit price without float error", () => {
+    const result = calculateInvoice(
+      [
+        { description: "Hours", quantity: 3, unitPriceCents: 1999 },
+        { description: "Parts", quantity: 2, unitPriceCents: 50 },
       ],
-    });
-
-    expect(result.lines[0].lineTotal).toBe("200.00");
-    expect(result.lines[1].lineTotal).toBe("50.00");
-    expect(result.subtotal).toBe("250.00");
-    expect(result.taxTotal).toBe("37.50");
-    expect(result.grandTotal).toBe("287.50");
+      2100,
+    );
+    expect(result.lineItems[0]?.lineTotalCents).toBe(5997);
+    expect(result.subtotalCents).toBe(6097);
+    expect(result.taxCents).toBe(1280); // 6097 * 0.21 = 1280.37 → 1280
+    expect(result.totalCents).toBe(7377);
   });
 
-  it("rounds each line half-up to 2 decimals before summing", () => {
-    const result = calculateInvoice({
-      taxRateBps: 0,
-      lineItems: [
-        { description: "A", quantity: "1", unitPrice: "1.005" },
-        { description: "B", quantity: "1", unitPrice: "1.005" },
-      ],
-    });
-
-    expect(result.lines[0].lineTotal).toBe("1.01");
-    expect(result.lines[1].lineTotal).toBe("1.01");
-    expect(result.subtotal).toBe("2.02");
+  it("allows zero-price lines and zero tax", () => {
+    const result = calculateInvoice(
+      [{ description: "Complimentary", quantity: 1, unitPriceCents: 0 }],
+      0,
+    );
+    expect(result.totalCents).toBe(0);
   });
 
-  it("rounds tax half-up from the rounded subtotal", () => {
-    const result = calculateInvoice({
-      taxRateBps: 1500,
-      lineItems: [{ description: "Item", quantity: "1", unitPrice: "10.01" }],
-    });
-
-    expect(result.subtotal).toBe("10.01");
-    expect(result.taxTotal).toBe("1.50");
-    expect(result.grandTotal).toBe("11.51");
-  });
-
-  it("allows zero tax and fractional quantities", () => {
-    const result = calculateInvoice({
-      taxRateBps: 0,
-      lineItems: [{ description: "Hours", quantity: "1.5", unitPrice: "80.00" }],
-    });
-
-    expect(result.lines[0].lineTotal).toBe("120.00");
-    expect(result.grandTotal).toBe("120.00");
-  });
-
-  it("rejects negative amounts", () => {
+  it("rejects fractional quantity", () => {
     expect(() =>
-      calculateInvoice({
-        taxRateBps: 0,
-        lineItems: [{ description: "Bad", quantity: "-1", unitPrice: "10" }],
-      }),
-    ).toThrow(MoneyError);
+      calculateInvoice([{ description: "x", quantity: 1.5, unitPriceCents: 100 }], 0),
+    ).toThrow(/quantity/);
+  });
+});
+
+describe("invoice numbering", () => {
+  it("pads to six digits", () => {
+    expect(formatInvoiceNumber(2026, 1)).toBe("INV-2026-000001");
+    expect(formatInvoiceNumber(2026, 42)).toBe("INV-2026-000042");
+  });
+});
+
+describe("validation", () => {
+  it("allows empty customer name on draft", () => {
+    const parsed = invoiceWriteSchema.safeParse({
+      customerName: "",
+      lineItems: [],
+    });
+    expect(parsed.success).toBe(true);
   });
 
-  it("rejects an out-of-range tax rate", () => {
-    expect(() =>
-      calculateInvoice({
-        taxRateBps: 10001,
-        lineItems: [{ description: "Item", quantity: "1", unitPrice: "1" }],
-      }),
-    ).toThrow(MoneyError);
+  it("requires customer name and a line to submit", () => {
+    const parsed = invoiceSubmitSchema.safeParse({
+      customerName: "  ",
+      lineItems: [],
+    });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      const fields = fieldErrors(parsed.error);
+      expect(fields.customerName).toBeTruthy();
+      expect(fields.lineItems).toBeTruthy();
+    }
   });
 });
