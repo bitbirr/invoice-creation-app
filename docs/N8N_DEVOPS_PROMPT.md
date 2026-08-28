@@ -72,7 +72,7 @@ This provisioner starts when **either**:
 
 Idempotency key = `project_key`. Re-running updates in place. Never create a second Railway project / Infisical project / CNAME for the same key.
 
-If `secrets_to_collect_from_human` are still empty in Infisical, provision DNS/DB/Railway **structure**, store generated secrets, then Slack **which keys are missing** (names only) and do not mark the app healthy until they are set.
+If `secrets_to_collect_from_human` are still empty in Infisical, provision DNS/DB/Railway **structure**, store generated secrets, then Slack **which keys are missing** (names only). Do **not** invent those values. Continue migrate, DNS, and `GET {health_path}` anyway. Do not mark the app **fully healthy** (login usable) until the human keys exist.
 
 ## Trigger contract (`devops_handoff`)
 
@@ -116,21 +116,23 @@ Rules:
 
 ## Recommended n8n graph (one workflow, all apps)
 
-Keep secrets off the canvas. Prefer Infisical → Railway **native sync** so n8n never puts `DATABASE_URL` in node output.
+Keep secrets off the canvas. Prefer Infisical → Railway **native sync** so n8n never puts `DATABASE_URL` in node output. If native sync is stuck **and** the Railway service already has the required non-empty keys (injected via secure stdin), treat env as done and continue.
 
 1. **Trigger** — Slack or webhook.
 2. **Parse + validate** — extract JSON; validate `type`, `project_key`, `github_repo`, `app_kind`.
 3. **Registry read** — Infisical `platform` folder `/apps/{project_key}` metadata (Railway id, Infisical project id, db name). Empty = first run.
 4. **Infisical app project** — create if missing; upsert `env_public`; generate missing `secrets_to_generate`; set `APP_URL`.
 5. **Postgres** — create database or schema; create `{slug}_app` role; write `DATABASE_URL` / `DIRECT_URL` **only** to Infisical.
-6. **Railway** — create project + `web` from GitHub; attach custom domain `{hostname}`; enable Infisical sync (or set vars from Infisical **without logging values**).
-7. **Cloudflare** — `CNAME {project_key} → <Railway domain target>` on zone `bitbirr.net`.
-8. **Migrate** — `npx prisma migrate deploy` (or handoff `db.migrate`) as a one-shot with the app role URL.
-9. **Health** — `GET https://{hostname}{health_path}` must be 200.
+6. **Railway** — create project + `web` from GitHub; attach custom domain `{hostname}`; sync or stdin-inject env (see Railway CLI trap below).
+7. **Cloudflare** — `CNAME {project_key} → <Railway domain target>` on zone `bitbirr.net`. This step is **independent** of `environment edit`.
+8. **Migrate** — `railway run --service web npx prisma migrate deploy` (preferred one-shot) or pre-deploy command after a successful JSON patch. Do not print the URL.
+9. **Health** — `GET https://{railway-generated-host}{health_path}` then later `https://{hostname}{health_path}`. HTTP 200 is enough; Railway `healthcheckPath` is optional if n8n already checks.
 10. **Registry write** — store ids (not secrets) under Infisical `platform` `/apps/{project_key}`.
-11. **Slack** — URL, Railway name, Infisical project name, DB name, pass/fail. **No secret values.**
+11. **Slack** — URL, Railway name, Infisical project name, DB name, pass/fail, missing human key **names**. **No secret values.**
 
-Use n8n **HTTP Request** nodes against Cloudflare API v4, Railway GraphQL, and Infisical API. Do not shell out to CLIs unless an API is missing. Cloudflare CLI/`wrangler` is for Workers; **DNS for `bitbirr.net` is the Cloudflare DNS API**.
+Use n8n **HTTP Request** nodes against Cloudflare API v4, Railway GraphQL, and Infisical API when possible. Execute Command is OK for `railway run` / `railway environment edit` **only** with the JSON-stdin form below.
+
+Cloudflare CLI/`wrangler` is for Workers; **DNS for `bitbirr.net` is the Cloudflare DNS API**.
 
 ## Pipeline (idempotent, this order)
 
@@ -145,7 +147,7 @@ Use n8n **HTTP Request** nodes against Cloudflare API v4, Railway GraphQL, and I
 ### 2. Infisical first (source of truth)
 
 1. Create Infisical project for `slug` if missing.
-2. Prefer **Infisical native Railway sync**. If that is not enabled, n8n may set Railway variables from Infisical reads but must **not** persist secret values in n8n execution data, Slack, or logs.
+2. Prefer **Infisical native Railway sync**. If that integration is failing, **stdin-inject** variables into Railway without logging values. Do not block the rest of the pipeline on native sync once the service already has non-empty application keys.
 3. Upsert `env_public`.
 4. Generate and upsert `secrets_to_generate` only when the key is absent.
 5. Upsert `APP_URL=https://{hostname}`.
@@ -163,7 +165,7 @@ Default for Next/Prisma apps: **one Postgres database (preferred) or one schema*
 2. Create role `{slug}_app` with a generated password; grant migrate rights **only** on that database/schema.
 3. Build `DATABASE_URL` (and `DIRECT_URL` if Prisma needs a non-pooled connection). Use the **app** role, never the admin URL, in the Next.js service.
 4. Store both URLs **only** in the app’s Infisical project.
-5. Run `db.migrate` from a one-shot job (Railway release command or n8n execute). Prisma default: `npx prisma migrate deploy`.
+5. Run `db.migrate` as a one-shot (`railway run`) even if pre-deploy is not configured yet. Prisma default: `npx prisma migrate deploy`.
 6. If migrate fails: stop, report the Prisma error, do not hand-edit tables.
 7. Backup before migrate when the target already has data.
 
@@ -173,11 +175,37 @@ Never put a Supabase `service_role` key in `NEXT_PUBLIC_*`. Prisma apps use serv
 
 1. Create Railway project `{slug}` if missing.
 2. Create service `web` from GitHub `github_repo` (branch `main` unless handoff says otherwise).
-3. Root: repo root. Build: Next.js (`npm install`, `npx prisma generate`, `next build`). Start: `next start`.
-4. Release command if needed: `npx prisma migrate deploy && npx prisma generate`.
-5. Attach custom domain `{hostname}` and read Railway’s required CNAME/verification target.
-6. Sync env from Infisical (including `DATABASE_URL`). Confirm required secret **keys** exist before calling the app healthy.
-7. Wait for a successful deploy. Do not merge GitHub PRs.
+3. Root: repo root. Build: Next.js (`npm install` includes `prisma` in production dependencies, `postinstall` runs `prisma generate`, then `next build`). Start: `next start`.
+4. Attach custom domain `{hostname}` and read Railway’s required CNAME/verification target.
+5. Confirm required **generated** secret keys exist on the service (`DATABASE_URL`, `AUTH_SECRET`, …). Human identity keys may still be empty.
+6. Wait for a successful deploy. Do not merge GitHub PRs.
+
+#### Railway CLI trap (n8n Execute Command)
+
+`railway environment edit --service-config …` **does not work from n8n**. n8n stdin is not a TTY. The CLI then treats stdin as an empty JSON patch, exits 0, and prints `No changes to apply` ([railwayapp/cli#1044](https://github.com/railwayapp/cli/issues/1044)). Two retries of that command are the same no-op. **Do not pause the pipeline on it.**
+
+Never use `--service-config` in n8n.
+
+**Configure deploy settings** by piping a JSON patch that uses the **service UUID**:
+
+1. `railway environment config --json` → read `services` keys (UUIDs).
+2. Pipe the patch (Execute Command must send this exact stdin; do not attach empty stdin / `/dev/null`):
+
+```bash
+printf '%s\n' '{"services":{"SERVICE_UUID":{"deploy":{"preDeployCommand":["npx prisma migrate deploy"],"startCommand":"npx next start","healthcheckPath":"/login","healthcheckTimeout":300}}}}' \
+  | railway environment edit --environment production -m "migrate + login healthcheck" --json
+```
+
+Success looks like `"committed": true`. If it still no-ops, skip `environment edit` and use the fallbacks below.
+
+**Fallbacks (use these on the current invoice-creation-app run):**
+
+- Migrate now: `railway run --service web npx prisma migrate deploy` (do not print env).
+- Health now: HTTP GET `https://<railway-generated-domain>/login` — expect 200. Empty `AUTH_EMAIL` / `COMPANY_*` do not block the login **page**.
+- DNS now: Cloudflare CNAME as in step 5. Independent of pre-deploy / healthcheckPath.
+- Infisical native Railway sync: optional. Stdin-injected vars already on the service count as env done.
+
+Do not mark fully healthy until human keys exist. Slack the missing key names.
 
 ### 5. Cloudflare subdomain on `bitbirr.net`
 
@@ -190,11 +218,12 @@ Automatic subdomain for every new app:
 
 ### 6. Verify (no secrets in the report)
 
-1. `https://{hostname}{health_path}` returns 200.
-2. Unauthenticated `/` redirects to login or APIs return 401, when the app has auth.
-3. DNS resolves. Railway deploy is SUCCESS.
-4. Infisical contains `DATABASE_URL` and generated secret **keys** (existence check only).
-5. Slack `#ceo`: `project_key`, GitHub repo, public URL, Railway project name, Infisical project name, DB name, pass/fail.
+1. `https://{railway-generated-host}{health_path}` returns 200 (do this even before custom DNS).
+2. After DNS: `https://{hostname}{health_path}` returns 200.
+3. Unauthenticated `/` redirects to login or APIs return 401, when the app has auth.
+4. Railway deploy is SUCCESS. Migrate applied (or Prisma error reported).
+5. Infisical contains `DATABASE_URL` and generated secret **keys** (existence check only).
+6. Slack `#ceo`: `project_key`, GitHub repo, public URL, Railway project name, Infisical project name, DB name, pass/fail, missing human key names.
 
 ## Standard for every future Next.js app
 
@@ -204,18 +233,20 @@ Same n8n workflow. New Architect app → new `project_key` → new pipeline inst
 | --- | --- |
 | App | Next.js App Router on Railway |
 | Data | Prisma + Postgres on self-hosted Supabase |
-| Secrets | Infisical project per `project_key`; Railway consumes via sync |
+| Secrets | Infisical project per `project_key`; Railway consumes via sync **or** one-shot stdin inject |
 | URL | `https://{project_key}.bitbirr.net` |
 | Auth | Generated in Infisical; humans supply business identity |
 | Preview | Later: `staging-{project_key}.bitbirr.net` — do not block MVP |
 | Observability | Railway logs + one Slack success/fail message |
+| Railway CLI from n8n | JSON patch on stdin, or `railway run` — never `--service-config` |
 
 Architect (coding) continuation: after architecture/scaffold PR, **always** emit `devops_handoff` and stop.
 
 ## Failure policy
 
 - Idempotent retries are OK.
-- After 2 failed attempts on the same step, stop and Slack the step name + error **without secrets**.
+- `No changes to apply` from `railway environment edit` in n8n is a **CLI no-op**, not a deploy failure. Switch to JSON stdin or `railway run`. Do not count two no-ops as a hard stop of DNS/migrate/health.
+- After 2 failed attempts on a **real** error (non-zero exit, Prisma migrate error, HTTP 5xx), stop and Slack the step name + error **without secrets**.
 - Never roll forward with a missing `DATABASE_URL` or empty `AUTH_SECRET`.
 
 ---
@@ -258,4 +289,4 @@ Expected after migrate: tables `Invoice`, `LineItem`, `InvoiceSequence`; enum `I
 
 Human product decisions already locked: standalone app, ETB, 15% VAT, login required, submitted invoices immutable.
 
-Application PRs stay human-merged. Coding branch for login/ETB: `feat/etb-vat-login` (do not merge from DevOps).
+**Resume after the Railway CLI no-op (2026-08-28):** do not retry `--service-config`. Run `railway run --service web npx prisma migrate deploy`, GET `/login` on the Railway domain, continue Cloudflare DNS, skip native Infisical sync if vars are already on the service, Slack missing `AUTH_EMAIL` / `COMPANY_*` names. Application PRs stay human-merged.
