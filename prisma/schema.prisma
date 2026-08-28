@@ -5,90 +5,61 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["invoice"]
 }
 
 enum InvoiceStatus {
-  draft
-  submitted
-  voided
-
-  @@schema("invoice")
-}
-
-model IssuerProfile {
-  id             String   @id @default(cuid())
-  legalName      String   @map("legal_name")
-  addressLine1   String?  @map("address_line1")
-  addressLine2   String?  @map("address_line2")
-  city           String?
-  region         String?
-  postalCode     String?  @map("postal_code")
-  country        String   @default("ET")
-  email          String?
-  phone          String?
-  taxId          String?  @map("tax_id")
-  currency       String   @default("ETB") @db.Char(3)
-  defaultTaxBps  Int      @default(0) @map("default_tax_bps")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-
-  @@map("issuer_profiles")
-  @@schema("invoice")
+  DRAFT
+  SUBMITTED
 }
 
 model Invoice {
-  id              String        @id @default(cuid())
-  status          InvoiceStatus @default(draft)
-  invoiceNumber   String?       @unique @map("invoice_number")
-  issueDate       DateTime      @map("issue_date") @db.Date
-  currency        String        @db.Char(3)
-  taxRateBps      Int           @map("tax_rate_bps")
+  id     String         @id @default(cuid())
+  status InvoiceStatus  @default(DRAFT)
+  number String?        @unique
 
-  customerName    String        @map("customer_name")
-  customerEmail   String?       @map("customer_email")
-  billingAddress  String?       @map("billing_address")
+  currency   String @db.Char(3)
+  taxRateBps Int
+
+  customerName    String
+  customerEmail   String?
+  customerAddress String?
   notes           String?
 
-  subtotalMinor   BigInt        @map("subtotal_minor")
-  taxMinor        BigInt        @map("tax_minor")
-  totalMinor      BigInt        @map("total_minor")
+  sellerName    String
+  sellerAddress String
+  sellerEmail   String
+  sellerVat     String
 
-  version         Int           @default(1)
-  submittedAt     DateTime?     @map("submitted_at")
-  snapshot        Json?
+  subtotalCents Int @default(0)
+  taxCents      Int @default(0)
+  totalCents    Int @default(0)
 
-  lineItems       LineItem[]
+  version     Int       @default(1)
+  issueDate   DateTime?
+  submittedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
+  lineItems LineItem[]
 
   @@index([status, createdAt])
-  @@map("invoices")
-  @@schema("invoice")
 }
 
 model LineItem {
-  id              String   @id @default(cuid())
-  invoiceId       String   @map("invoice_id")
-  position        Int
-  description     String
-  quantityMilli   Int      @map("quantity_milli")
-  unitPriceMinor  BigInt   @map("unit_price_minor")
-  lineTotalMinor  BigInt   @map("line_total_minor")
-
-  invoice         Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  id             String  @id @default(cuid())
+  invoiceId      String
+  invoice        Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  position       Int
+  description    String
+  quantity       Int
+  unitPriceCents Int
+  lineTotalCents Int
 
   @@index([invoiceId, position])
-  @@map("line_items")
-  @@schema("invoice")
 }
 
-/// Allocates sequential invoice numbers per calendar year on submit.
-model InvoiceNumberSequence {
-  year      Int @id
-  lastValue Int @map("last_value")
-
-  @@map("invoice_number_sequences")
-  @@schema("invoice")
+/// Per-year monotonic counter used to assign invoice numbers on submit.
+model InvoiceSequence {
+  year Int @id
+  last Int
 }
