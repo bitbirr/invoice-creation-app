@@ -62,6 +62,12 @@ export const invoiceSubmitSchema = invoiceWriteSchema.superRefine((value, ctx) =
 export type InvoiceWrite = z.infer<typeof invoiceWriteSchema>;
 export type InvoicePatch = z.infer<typeof invoicePatchSchema>;
 
+export const invoicePreviewSchema = z.object({
+  currency: z.string().length(3),
+  taxRateBps: z.number().int().min(0).max(10000),
+  lineItems: z.array(lineItemWriteSchema).min(1),
+});
+
 export function fieldErrors(error: z.ZodError): Record<string, string> {
   const fields: Record<string, string> = {};
   for (const issue of error.issues) {

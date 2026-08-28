@@ -1,28 +1,9 @@
-import { NextResponse } from "next/server";
-import { z } from "zod";
-import { getPrisma } from "@/lib/db";
-import { fromUnknown, jsonError } from "@/lib/http";
-import { createInvoiceService } from "@/lib/invoice-service";
+import { jsonError } from "@/lib/http";
 
-type RouteContext = { params: Promise<{ id: string }> };
-
-const voidSchema = z.object({
-  reason: z.string().trim().min(1).max(500),
-});
-
-export async function POST(request: Request, context: RouteContext) {
-  const prisma = getPrisma();
-  if (!prisma) {
-    return jsonError(503, "database_unavailable", "DATABASE_URL is not set.");
-  }
-  try {
-    const { id } = await context.params;
-    const body = await request.json();
-    const { reason } = voidSchema.parse(body);
-    const invoice = await createInvoiceService(prisma).voidInvoice(id, reason);
-    if (!invoice) return jsonError(404, "not_found", "Invoice not found");
-    return NextResponse.json({ invoice });
-  } catch (error) {
-    return fromUnknown(error);
-  }
+export async function POST() {
+  return jsonError(
+    409,
+    "INVOICE_IMMUTABLE",
+    "Voiding is not in MVP. Submitted invoices stay locked.",
+  );
 }

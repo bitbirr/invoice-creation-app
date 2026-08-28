@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for this scaffold (reversible before first production data).
+Accepted (human-confirmed 2026-08-28): stay **standalone**. Do not extend Supplier Invoice Tracker.
 
 ## Context
 
