@@ -1,5 +1,9 @@
--- CreateEnum
-CREATE TYPE "InvoiceStatus" AS ENUM ('DRAFT', 'SUBMITTED');
+-- public."InvoiceStatus" already exists from 20260828120000_init
+-- (DRAFT, SUBMITTED, VOID). Creating it again is Prisma P3018.
+-- This migration only creates the tables prisma/schema.prisma uses.
+-- Leftover objects from 20260828100000_init (schema invoice) and
+-- 20260828120000_init (public.invoices, organization_settings) are
+-- unused by the app; do not drop them in this migration.
 
 -- CreateTable
 CREATE TABLE "Invoice" (
